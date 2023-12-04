@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+        <title>Babylon.js sample code</title>
+
+        <!-- Babylon.js -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.6.2/dat.gui.min.js"></script>
+        <script src="https://assets.babylonjs.com/generated/Assets.js"></script>
+        <script src="https://cdn.babylonjs.com/recast.js"></script>
+        <script src="https://cdn.babylonjs.com/ammo.js"></script>
+        <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
+        <script src="https://cdn.babylonjs.com/cannon.js"></script>
+        <script src="https://cdn.babylonjs.com/Oimo.js"></script>
+        <script src="https://cdn.babylonjs.com/earcut.min.js"></script>
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+        <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+        <script src="https://cdn.babylonjs.com/proceduralTexturesLibrary/babylonjs.proceduralTextures.min.js"></script>
+        <script src="https://cdn.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
+        <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.js"></script>
+        <script src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.min.js"></script>
+        <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+        <script src="https://cdn.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
+
+        <style>
+            html, body {
+                overflow: hidden;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            #renderCanvas {
+                width: 100%;
+                height: 100%;
+                touch-action: none;
+            }
+            
+            #canvasZone {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+<body>
+    <div id="canvasZone"><canvas id="renderCanvas"></canvas></div>
+    <script>
+        var canvas = document.getElementById("renderCanvas");
+
+        var startRenderLoop = function (engine, canvas) {
+            engine.runRenderLoop(function () {
+                if (sceneToRender && sceneToRender.activeCamera) {
+                    sceneToRender.render();
+                }
+            });
+        }
+
+        var engine = null;
+        var scene = null;
+        var sceneToRender = null;
+        var createDefaultEngine = function() { return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true,  disableWebGL2Support: false}); };
+         var createScene = function () {
+    var scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color3.Black;
+
+    var camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 10, new BABYLON.Vector3(0, 0, 0));
+    camera.attachControl(canvas, true);
+
+    var light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+    light.intensity = 0.7;
+
+    // Create an instance of the VerticesManipulator class
+    const man = new VerticesManipulator(scene);
+    var ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 6, height: 6 }, scene);
+    var shapeSpheres = [];
+    var shapeLines = [];
+    var moveModeEnabled = false;
+    var drawModeEnabled = false;
+    var editVertexEnabled = false
+    var isDragging = false;
+    var selectedMesh = null;
+    
+    var startingPoint;
+    
+    // Bounding box renderer
+    var boundingBoxRenderer = null; 
+
+    scene.onPointerDown = function (evt, pickResult) {
+        if (evt.button === 0) {
+            if (pickResult.hit) {
+                if (moveModeEnabled) {
+                    if (selectedMesh) {
+                        // Reset appearance of previously selected mesh
+                        selectedMesh.renderOutline = false;
+                        selectedMesh.outlineWidth = 0;
+
+                        // Remove the previous bounding box
+                        if (boundingBoxRenderer) {
+                            boundingBoxRenderer.dispose();
+                        }
+                    }
+
+                    selectedMesh = pickResult.pickedMesh;
+                    startingPoint = getGroundPosition(evt);
+                    isDragging = true;
+
+                    // Highlight the selected mesh
+                    if (selectedMesh) {
+                        selectedMesh.renderOutline = true;
+                        selectedMesh.outlineColor = new BABYLON.Color3(1, 1, 0);
+                        selectedMesh.outlineWidth = 0.1;
+
+                        // Create a bounding box for the selected mesh
+                        boundingBoxRenderer = new BABYLON.BoundingBoxRenderer(selectedMesh, scene);
+                        boundingBoxRenderer.showBackLines = false;
+                        boundingBoxRenderer.frontColor = new BABYLON.Color3(1, 1, 0);
+                    }
+                } else if (drawModeEnabled) {
+                    var point = pickResult.pickedPoint.clone();
+                    var sphere = BABYLON.MeshBuilder.CreateSphere("vertexSphere", { diameter: 0.2 }, scene);
+                    sphere.position = point;
+                    shapeSpheres.push(sphere);
+                    updateShapeLines();
+                }
+            }
+        } 
+    };
+
+    scene.onPointerObservable.add((evt) => {
+    switch (evt.type) {
+        case BABYLON.PointerEventTypes.POINTERDOWN:
+            // Check for right-click (button 2)
+            if (evt.event.button === 2 && editVertexEnabled) {
+                // Set and update vertex data for the box mesh
+                var ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
+                var hit = scene.pickWithRay(ray);
+                if (hit.pickedMesh) {
+                    // Call the selectVertices method of the VerticesManipulator class
+                    man.selectVertices(hit,3);
+                }
+            }
+            break;
+    }
+});
+
+    scene.onPointerMove = function (evt, pickResult) {
+        if (!isDragging) return;
+
+        if (moveModeEnabled && selectedMesh) {
+            var current = getGroundPosition(evt);
+            if (startingPoint) {
+                var delta = current.subtract(startingPoint);
+                selectedMesh.position.addInPlace(delta);
+            }
+            startingPoint = current;
+        }
+    };
+
+    scene.onPointerUp = function () {
+        isDragging = false;
+        startingPoint = null;
+
+        // Reset appearance of previously selected mesh
+        if (selectedMesh) {
+            selectedMesh.renderOutline = false;
+            selectedMesh.outlineWidth = 0;
+            selectedMesh = null;
+
+            // Remove the bounding box
+            if (boundingBoxRenderer) {
+                boundingBoxRenderer.dispose();
+                boundingBoxRenderer = null;
+            }
+        }
+    };
+
+
+    function updateShapeLines() {
+        shapeLines.forEach(line => line.dispose());
+        shapeLines = [];
+
+        for (var i = 1; i < shapeSpheres.length; i++) {
+            var line = BABYLON.MeshBuilder.CreateLines("shapeLine", {
+                points: [shapeSpheres[i - 1].position, shapeSpheres[i].position],
+                updatable: true
+            }, scene);
+            shapeLines.push(line);
+        }
+
+        if (shapeSpheres.length > 2) {
+            var line = BABYLON.MeshBuilder.CreateLines("shapeLine", {
+                points: [shapeSpheres[shapeSpheres.length - 1].position, shapeSpheres[0].position],
+                updatable: true
+            }, scene);
+            shapeLines.push(line);
+        }
+    }
+
+    function getGroundPosition(evt) {
+        var pickinfo = scene.pick(scene.pointerX, scene.pointerY, function (mesh) { return mesh == ground; });
+        if (pickinfo.hit) {
+            return pickinfo.pickedPoint;
+        }
+        return null;
+    }
+
+
+    // GUI
+    var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+
+    // Create a text block for displaying the current mode
+    var modeText = new BABYLON.GUI.TextBlock();
+    modeText.text = "Current Mode: No Mode Selected";
+    modeText.color = "white";
+    modeText.fontSize = 20;
+
+    // Set text block position
+    modeText.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+    modeText.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+    modeText.top = "-250px";
+    modeText.left = "250px";
+
+    // Add text block to the UI
+    advancedTexture.addControl(modeText);
+
+    // Function to update the mode display text
+    function updateModeDisplayText() {
+        if (moveModeEnabled) {
+            modeText.text = "Current Mode: Move Mode";
+        
+        } else if (drawModeEnabled) {
+            modeText.text = "Current Mode: Draw Mode";
+         
+        } else if (editVertexEnabled) {
+            modeText.text = "Current Mode: Edit Vertex Mode";
+           
+        } else {
+            modeText.text = "Current Mode: No Mode Selected";
+        }
+    }
+
+    // Extrude Button
+    var extrudeButton = BABYLON.GUI.Button.CreateSimpleButton("extrudeButton", "Extrude");
+    extrudeButton.width = "150px";
+    extrudeButton.height = "40px";
+    extrudeButton.color = "white";
+    extrudeButton.cornerRadius = 20;
+    extrudeButton.background = "green";
+
+    extrudeButton.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+    extrudeButton.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+
+    extrudeButton.paddingLeft = "10px";
+    extrudeButton.paddingTop = "10px"; 
+    extrudeButton.top = "40px";
+    extrudeButton.left="0px";
+
+    extrudeButton.onPointerUpObservable.add(function () {
+        if (shapeSpheres.length >= 3) {
+            var extrusionHeight = 3;
+            var shapePositions = shapeSpheres.map(sphere => sphere.position.clone());
+            var minY = Math.min(...shapePositions.map(pos => pos.y));
+            var maxHeight = extrusionHeight + minY;
+
+            var shape = BABYLON.MeshBuilder.ExtrudePolygon("extrudedShape", {
+                shape: shapePositions,
+                depth: extrusionHeight,
+                sideOrientation: BABYLON.Mesh.DOUBLESIDE,
+            }, scene);
+            shape.isPickable = true;
+
+            // Store positions and normals
+            var positions = shape.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+            shape.setVerticesData(BABYLON.VertexBuffer.PositionKind, positions, true);
+            var normals = shape.getVerticesData(BABYLON.VertexBuffer.NormalKind);
+            shape.setVerticesData(BABYLON.VertexBuffer.NormalKind, normals, true);
+
+
+            shape.position.y = Math.max(maxHeight, ground.position.y + 0.001);
+            shapeSpheres.forEach(sphere => sphere.dispose());
+            shapeLines.forEach(line => line.dispose());
+            shapeSpheres = [];
+            shapeLines = [];
+        }
+    });
+
+    advancedTexture.addControl(extrudeButton);
+
+    // Button to toggle Move Mode
+    var moveModeButton = BABYLON.GUI.Button.CreateSimpleButton("moveModeButton", "Move");
+    moveModeButton.width = "150px";
+    moveModeButton.height = "40px";
+    moveModeButton.color = "white";
+    moveModeButton.cornerRadius = 20;
+    moveModeButton.background = "blue";
+
+    moveModeButton.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+    moveModeButton.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+
+    moveModeButton.paddingLeft = "10px";
+    moveModeButton.paddingTop = "10px";
+    moveModeButton.top = "80px";
+    moveModeButton.left="0px";
+
+    moveModeButton.onPointerUpObservable.add(function () {
+        moveModeEnabled = !moveModeEnabled;
+        updateModeDisplayText();
+        isDragging = false;
+        startingPoint = null;
+
+        // Display alert when Move Mode is enabled or disabled
+        var alertMessage = moveModeEnabled ? "Move Mode Enabled" : "Move Mode Disabled";
+        alert(alertMessage);
+
+        // Reset appearance of previously selected mesh
+        if (!moveModeEnabled && selectedMesh) {
+            selectedMesh.renderOutline = false;
+            selectedMesh.outlineWidth = 0;
+            selectedMesh = null;
+
+            // Remove the bounding box
+            if (boundingBoxRenderer) {
+                boundingBoxRenderer.dispose();
+                boundingBoxRenderer = null;
+            }
+        }
+    });
+
+    advancedTexture.addControl(moveModeButton);
+
+    // Button to toggle Draw Mode
+    var drawModeButton = BABYLON.GUI.Button.CreateSimpleButton("drawModeButton", "Draw");
+    drawModeButton.width = "150px";
+    drawModeButton.height = "40px";
+    drawModeButton.color = "white";
+    drawModeButton.cornerRadius = 20;
+    drawModeButton.background = "purple";
+
+    drawModeButton.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+    drawModeButton.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+
+    drawModeButton.paddingLeft = "10px";
+    drawModeButton.paddingTop = "10px";
+    
+
+    drawModeButton.onPointerUpObservable.add(function () {
+        drawModeEnabled = !drawModeEnabled;
+        updateModeDisplayText();
+        // Display alert when Draw Mode is enabled or disabled
+        var alertMessage = drawModeEnabled ? "Draw Mode Enabled" : "Draw Mode Disabled";
+        alert(alertMessage);
+
+        // Reset appearance of previously selected mesh
+        if (!drawModeEnabled && selectedMesh) {
+            selectedMesh.renderOutline = false;
+            selectedMesh.outlineWidth = 0;
+            selectedMesh = null;
+
+            // Remove the bounding box
+            if (boundingBoxRenderer) {
+                boundingBoxRenderer.dispose();
+                boundingBoxRenderer = null;
+            }
+        }
+    });
+
+    advancedTexture.addControl(drawModeButton);
+
+    // Button to toggle Edit vertex Mode
+    var editVertexeButton = BABYLON.GUI.Button.CreateSimpleButton("editVertexeButton", "Edit Vertex");
+    editVertexeButton.width = "150px";
+    editVertexeButton.height = "40px";
+    editVertexeButton.color = "white";
+    editVertexeButton.cornerRadius = 20;
+    editVertexeButton.background = "orange";
+
+    editVertexeButton.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+    editVertexeButton.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+
+    editVertexeButton.paddingLeft = "10px";
+    editVertexeButton.paddingTop = "10px";
+    editVertexeButton.top = "120px";
+    editVertexeButton.left="0px";
+
+    editVertexeButton.onPointerUpObservable.add(function () {
+        editVertexEnabled = !editVertexEnabled;
+        updateModeDisplayText();
+        isDragging = false;
+        startingPoint = null;
+
+        // Display alert when Move Mode is enabled or disabled
+        var alertMessage = editVertexEnabled ? "Edit vertex Mode Enabled" : "Edit vertex Mode Disabled";
+        alert(alertMessage);
+
+    });
+
+    advancedTexture.addControl(editVertexeButton);
+
+    return scene;
+    
+};
+// Class for manipulating vertices
+class VerticesManipulator {
+    constructor(scene) {
+        this.scene = scene;
+        this.meshes = new Map();
+        this.radius = 5;
+        this.pickOrigin = new BABYLON.Vector3();
+
+        this.tmpVec = new BABYLON.Vector3();
+        this.spheres = [];
+       this.sphere = BABYLON.MeshBuilder.CreateSphere("sp", { diameter: 0.001 }, this.scene);
+        this.tranny = new BABYLON.TransformNode("tranny", this.scene);
+        this.selectedVertices = [];
+        this.selectedMesh = null;
+        this.gizmoManager = new BABYLON.GizmoManager(this.scene);
+
+        // Configure gizmo settings
+        this.gizmoManager.positionGizmoEnabled = true;
+        this.gizmoManager.rotationGizmoEnabled = false;
+        this.gizmoManager.scaleGizmoEnabled = false;
+        this.gizmoManager.boundingBoxGizmoEnabled = false;
+
+        // Set attachable meshes for the gizmo manager
+        this.gizmoManager.attachableMeshes = [this.tranny];
+
+        // Add a callback for the position gizmo's drag end event
+        this.gizmoManager.gizmos.positionGizmo.onDragEndObservable.add(() => {
+            const transformMesh = this.gizmoManager.gizmos.positionGizmo.attachedMesh;
+            if (!this.selectedVertices) {
+                return;
+            }
+            const delta = transformMesh.position.subtract(this.pickOrigin);
+            for (let i = 0; i < this.selectedVertices.length; ++i) {
+                this.selectedVertices[i].addInPlace(delta);
+                if (this.spheres[i]) {
+                    this.spheres[i].position.copyFrom(this.selectedVertices[i])
+                }
+            }
+            this.pickOrigin.addInPlace(delta);
+            this.updateVertices(this.selectedMesh);
+        });
+
+    }
+
+    // Method to add a mesh to the list of meshes
+    addMesh(mesh) {
+        mesh.isPickable = true;
+        const positions = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+        const vertices = [];
+        for (let i = 0; i < positions.length; i += 3) {
+            vertices.push(new BABYLON.Vector3(positions[i], positions[i + 1], positions[i + 2]));
+        }
+        this.meshes.set(mesh, { mesh: mesh, vertices: vertices });
+    }
+
+    // Method to update the vertices of a mesh
+    updateVertices(mesh) {
+       
+        const mesh2 = this.meshes.get(mesh);
+        if (!mesh2) {
+            return;
+        }
+    // Transform vertices to local space
+    const localVertices = mesh2.vertices.map(vert => {
+        const localVert = vert.clone();
+        mesh.getWorldMatrix().invertToRef(mesh.getWorldMatrix(), mesh._worldMatrix);
+        BABYLON.Vector3.TransformCoordinatesToRef(vert, mesh._worldMatrix, localVert);
+        return localVert;
+    });
+        const positions = [];
+        for (let i = 0; i < mesh2.vertices.length; ++i) {
+            const vert = mesh2.vertices[i];
+            positions.push(vert.x, vert.y, vert.z);
+        }
+        mesh.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
+        
+    }
+
+
+// Method to select vertices based on a hit
+selectVertices(hit, numVertices) {
+    for (let i = 0; i < this.spheres.length; ++i) {
+        this.spheres[i].dispose();
+    }
+    this.spheres.length = 0;
+    this.selectedVertices.length = 0;
+    this.selectedMesh = null;
+    this.selectedHit = null;
+
+    if (!this.meshes.has(hit.pickedMesh)) {
+        this.addMesh(hit.pickedMesh);
+    }
+
+    this.selectedMesh = hit.pickedMesh;
+    this.selectedHit = hit;
+
+    const mesh = this.meshes.get(hit.pickedMesh);
+
+    // Sort vertices based on distance
+    const sortedVertices = mesh.vertices.map((vertex, index) => {
+        BABYLON.Vector3.TransformCoordinatesToRef(vertex, mesh.mesh.getWorldMatrix(), this.tmpVec);
+        const distance = BABYLON.Vector3.Distance(this.tmpVec, hit.pickedPoint);
+        return { index, distance };
+    });
+
+    // Sort by distance
+    sortedVertices.sort((a, b) => a.distance - b.distance);
+
+    // Select the nearest numVertices vertices
+    for (let i = 0; i < Math.min(numVertices, sortedVertices.length); ++i) {
+        const vertexIndex = sortedVertices[i].index;
+        const instance = this.sphere.createInstance("spi" + vertexIndex);
+        instance.position.copyFrom(mesh.vertices[vertexIndex]);
+        this.spheres.push(instance);
+        this.selectedVertices.push(mesh.vertices[vertexIndex]);
+        console.log("Selected Vertex " + vertexIndex + ":", this.selectedVertices[i]);
+    }
+
+    console.log("Selected Vertices:", this.selectedVertices);
+    this.tranny.position.copyFrom(hit.pickedPoint);
+    this.gizmoManager.attachToMesh(this.tranny);
+    this.pickOrigin.copyFrom(hit.pickedPoint);
+}
+}
+
+                window.initFunction = async function() {
+                    
+                    
+                    
+                    var asyncEngineCreation = async function() {
+                        try {
+                        return createDefaultEngine();
+                        } catch(e) {
+                        console.log("the available createEngine function failed. Creating the default engine instead");
+                        return createDefaultEngine();
+                        }
+                    }
+
+                    window.engine = await asyncEngineCreation();
+        if (!engine) throw 'engine should not be null.';
+        startRenderLoop(engine, canvas);
+        window.scene = createScene();};
+        initFunction().then(() => {sceneToRender = scene                    
+        });
+
+        // Resize
+        window.addEventListener("resize", function () {
+            engine.resize();
+        });
+    </script>
+</body>
+</html>
