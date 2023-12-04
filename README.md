@@ -1,4 +1,4 @@
-# Babylon.js 3D Drawing App
+# Artify3D
 
 ## Overview
 This desktop-only web application utilizes [Babylon.js](https://www.babylonjs.com/) to enable users to draw 2D diagrams and extrude them into 3D shapes. Users can manipulate and interact with the created objects by moving them and updating their vertices.
